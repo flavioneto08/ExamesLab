@@ -1,6 +1,6 @@
 // Detect base path from location
 const BASE_PATH = self.location.pathname.replace(/sw\.js$/, '');
-const CACHE_NAME = 'examelab-v2';
+const CACHE_NAME = 'examelab-v3';
 const ASSETS = [
   BASE_PATH,
   BASE_PATH + 'index.html',
