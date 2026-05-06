@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  // For Netlify, use '/' (default).
-  // For GitHub Pages, change to '/examelab/' (or your repo name).
-  base: '/',
+  // For GitHub Pages, use the repo name as base path.
+  // For Netlify, change to '/'.
+  base: '/ExamesLab/',
   build: {
     outDir: 'dist',
     assetsDir: 'assets',

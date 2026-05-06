@@ -1,9 +1,11 @@
-const CACHE_NAME = 'examelab-v1';
+// Detect base path from location
+const BASE_PATH = self.location.pathname.replace(/sw\.js$/, '');
+const CACHE_NAME = 'examelab-v2';
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon.svg'
+  BASE_PATH,
+  BASE_PATH + 'index.html',
+  BASE_PATH + 'manifest.json',
+  BASE_PATH + 'icon.svg'
 ];
 
 self.addEventListener('install', (event) => {
