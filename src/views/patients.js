@@ -1,4 +1,4 @@
-import { getPatients, createPatient, updatePatient, deletePatient, getPatientStats } from '../supabase.js';
+import { getPatients, createPatient, updatePatient, deletePatient, getPatientStats, getExamRecords, getExamTypes } from '../supabase.js';
 import { showToast } from '../components/toast.js';
 import { openModal } from '../components/modal.js';
 
@@ -23,10 +23,11 @@ export async function renderPatients(container) {
 
   const listEl = container.querySelector('#patients-list');
   let patients = [];
+  let examTypes = [];
 
   async function loadPatients() {
     try {
-      patients = await getPatients();
+      [patients, examTypes] = await Promise.all([getPatients(), getExamTypes()]);
       const statsPromises = patients.map(p => getPatientStats(p.id));
       const stats = await Promise.all(statsPromises);
       patients.forEach((p, i) => p._stats = stats[i]);
@@ -79,13 +80,153 @@ export async function renderPatients(container) {
       });
     });
 
+    // Card click → overview
     listEl.querySelectorAll('.patient-card').forEach(card => {
       card.addEventListener('click', () => {
-        window.location.hash = `#/exames?paciente=${card.dataset.id}`;
+        const p = patients.find(x => x.id === card.dataset.id);
+        if (p) openPatientOverview(p);
       });
     });
   }
 
+  // ===== PATIENT OVERVIEW =====
+  async function openPatientOverview(patient) {
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'overview-body';
+    bodyEl.innerHTML = `
+      <div class="overview-header-info">
+        <div class="overview-avatar">${patient.name.charAt(0).toUpperCase()}</div>
+        <div>
+          <div class="overview-name">${escapeHtml(patient.name)}</div>
+          <div class="overview-meta">
+            ${patient._stats?.totalRecords || 0} registros em ${patient._stats?.totalDays || 0} dia(s)
+            ${patient._stats?.lastDate ? ` · Último: ${formatDate(patient._stats.lastDate)}` : ''}
+          </div>
+        </div>
+      </div>
+
+      <div class="overview-grid">
+        <!-- Notes section -->
+        <div class="overview-section overview-notes-section">
+          <div class="overview-section-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            Notas do Paciente
+          </div>
+          <textarea
+            id="overview-notes"
+            class="form-input overview-notes-textarea"
+            placeholder="Leito, diagnóstico, evolução clínica..."
+          >${escapeHtml(patient.notes || '')}</textarea>
+          <button id="save-notes-btn" class="btn btn-primary btn-sm" style="margin-top:8px;align-self:flex-end">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            Salvar Notas
+          </button>
+        </div>
+
+        <!-- Records section -->
+        <div class="overview-section overview-records-section">
+          <div class="overview-section-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            Histórico de Exames
+          </div>
+          <div id="overview-records-container">
+            <div class="spinner"></div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const modal = openModal({
+      title: 'Visão Geral do Paciente',
+      body: bodyEl,
+      footer: `
+        <button class="btn btn-secondary" data-close>Fechar</button>
+        <button class="btn btn-primary" id="overview-go-exams">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Registrar Exames
+        </button>
+      `,
+      wide: true
+    });
+
+    // Save notes
+    modal.element.querySelector('#save-notes-btn').addEventListener('click', async () => {
+      const notes = modal.element.querySelector('#overview-notes').value.trim();
+      const btn = modal.element.querySelector('#save-notes-btn');
+      btn.disabled = true;
+      try {
+        await updatePatient(patient.id, { notes });
+        patient.notes = notes;
+        showToast('Notas salvas!');
+        await loadPatients(); // refresh card
+      } catch (err) {
+        showToast('Erro ao salvar: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // Go to exams
+    modal.element.querySelector('#overview-go-exams').addEventListener('click', () => {
+      modal.close();
+      window.location.hash = `#/exames?paciente=${patient.id}`;
+    });
+
+    // Load exam records
+    loadOverviewRecords(modal.element.querySelector('#overview-records-container'), patient.id);
+  }
+
+  async function loadOverviewRecords(containerEl, patientId) {
+    try {
+      const records = await getExamRecords(patientId);
+
+      if (records.length === 0) {
+        containerEl.innerHTML = `
+          <div class="overview-empty">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <p>Nenhum exame registrado ainda</p>
+          </div>`;
+        return;
+      }
+
+      // Group by date
+      const byDate = {};
+      records.forEach(r => {
+        if (!byDate[r.exam_date]) byDate[r.exam_date] = [];
+        byDate[r.exam_date].push(r);
+      });
+      const sortedDates = Object.keys(byDate).sort().reverse();
+
+      containerEl.innerHTML = sortedDates.map(date => {
+        const dayRecords = byDate[date];
+        const chips = dayRecords.map(r => {
+          const et = r.exam_types;
+          if (!et) return '';
+          const val = r.value;
+          let chipClass = '';
+          if (et.reference_max != null && val > et.reference_max) chipClass = 'exam-chip-high';
+          else if (et.reference_min != null && val < et.reference_min) chipClass = 'exam-chip-low';
+          return `<span class="exam-chip ${chipClass}" title="${escapeHtml(et.name || et.abbreviation)}">
+            <span class="exam-chip-abbr">${escapeHtml(et.abbreviation)}</span>
+            <span class="exam-chip-val">${val}</span>
+          </span>`;
+        }).join('');
+
+        return `
+          <div class="date-record-group">
+            <div class="date-record-header">
+              <span class="date-badge">${formatDate(date)}</span>
+              <span class="date-count">${dayRecords.length} exame(s)</span>
+            </div>
+            <div class="exam-chips-row">${chips}</div>
+          </div>`;
+      }).join('');
+    } catch (err) {
+      containerEl.innerHTML = `<div class="overview-empty"><p>Erro ao carregar registros</p></div>`;
+    }
+  }
+
+  // ===== PATIENT MODAL (create/edit) =====
   function openPatientModal(patient = null) {
     const isEdit = !!patient;
     const bodyEl = document.createElement('div');
@@ -109,7 +250,6 @@ export async function renderPatients(container) {
       `
     });
 
-    modal.element.querySelector('[data-close]').addEventListener('click', modal.close);
     modal.element.querySelector('#modal-save').addEventListener('click', async () => {
       const name = modal.element.querySelector('#modal-patient-name').value.trim();
       const notes = modal.element.querySelector('#modal-patient-notes').value.trim();
@@ -141,7 +281,6 @@ export async function renderPatients(container) {
         <button class="btn btn-danger" id="modal-confirm-delete">Excluir</button>
       `
     });
-    modal.element.querySelector('[data-close]').addEventListener('click', modal.close);
     modal.element.querySelector('#modal-confirm-delete').addEventListener('click', async () => {
       try {
         await deletePatient(patient.id);
@@ -165,7 +304,7 @@ export async function renderPatients(container) {
 
 function escapeHtml(str) {
   const d = document.createElement('div');
-  d.textContent = str;
+  d.textContent = str || '';
   return d.innerHTML;
 }
 

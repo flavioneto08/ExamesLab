@@ -22,7 +22,7 @@ export function openModal({ title, body, footer, onClose, wide = false }) {
     }, 150);
   };
 
-  backdrop.querySelector('[data-close]').addEventListener('click', close);
+  backdrop.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', close));
   backdrop.addEventListener('click', (e) => {
     if (e.target === backdrop) close();
   });
