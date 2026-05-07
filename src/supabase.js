@@ -25,10 +25,10 @@ export async function getPatient(id) {
   return data;
 }
 
-export async function createPatient(name, notes = '') {
+export async function createPatient(name, notes = '', location = '') {
   const { data, error } = await supabase
     .from('patients')
-    .insert({ name, notes })
+    .insert({ name, notes, location })
     .select()
     .single();
   if (error) throw error;

@@ -23,11 +23,10 @@ export async function renderPatients(container) {
 
   const listEl = container.querySelector('#patients-list');
   let patients = [];
-  let examTypes = [];
 
   async function loadPatients() {
     try {
-      [patients, examTypes] = await Promise.all([getPatients(), getExamTypes()]);
+      patients = await getPatients();
       const statsPromises = patients.map(p => getPatientStats(p.id));
       const stats = await Promise.all(statsPromises);
       patients.forEach((p, i) => p._stats = stats[i]);
@@ -51,7 +50,7 @@ export async function renderPatients(container) {
     listEl.innerHTML = list.map(p => `
       <div class="card patient-card" data-id="${p.id}">
         <div class="patient-name">${escapeHtml(p.name)}</div>
-        <div class="patient-notes">${p.notes ? escapeHtml(p.notes) : '<em style="color:var(--text-muted)">Sem observações</em>'}</div>
+        <div class="patient-location">${p.location ? escapeHtml(p.location) : '<em style="color:var(--text-muted)">Sem localização</em>'}</div>
         <div class="patient-meta">
           <span>📋 ${p._stats?.totalRecords || 0} registros</span>
           <span>📅 ${p._stats?.totalDays || 0} dias</span>
@@ -80,7 +79,6 @@ export async function renderPatients(container) {
       });
     });
 
-    // Card click → overview
     listEl.querySelectorAll('.patient-card').forEach(card => {
       card.addEventListener('click', () => {
         const p = patients.find(x => x.id === card.dataset.id);
@@ -99,6 +97,7 @@ export async function renderPatients(container) {
         <div>
           <div class="overview-name">${escapeHtml(patient.name)}</div>
           <div class="overview-meta">
+            ${patient.location ? `<span class="overview-location">📍 ${escapeHtml(patient.location)}</span> · ` : ''}
             ${patient._stats?.totalRecords || 0} registros em ${patient._stats?.totalDays || 0} dia(s)
             ${patient._stats?.lastDate ? ` · Último: ${formatDate(patient._stats.lastDate)}` : ''}
           </div>
@@ -115,7 +114,7 @@ export async function renderPatients(container) {
           <textarea
             id="overview-notes"
             class="form-input overview-notes-textarea"
-            placeholder="Leito, diagnóstico, evolução clínica..."
+            placeholder="Evolução clínica, diagnóstico, observações..."
           >${escapeHtml(patient.notes || '')}</textarea>
           <button id="save-notes-btn" class="btn btn-primary btn-sm" style="margin-top:8px;align-self:flex-end">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
@@ -149,7 +148,6 @@ export async function renderPatients(container) {
       size: 'xl'
     });
 
-    // Save notes
     modal.element.querySelector('#save-notes-btn').addEventListener('click', async () => {
       const notes = modal.element.querySelector('#overview-notes').value.trim();
       const btn = modal.element.querySelector('#save-notes-btn');
@@ -158,7 +156,6 @@ export async function renderPatients(container) {
         await updatePatient(patient.id, { notes });
         patient.notes = notes;
         showToast('Notas salvas!');
-        await loadPatients(); // refresh card
       } catch (err) {
         showToast('Erro ao salvar: ' + err.message, 'error');
       } finally {
@@ -166,13 +163,11 @@ export async function renderPatients(container) {
       }
     });
 
-    // Go to exams
     modal.element.querySelector('#overview-go-exams').addEventListener('click', () => {
       modal.close();
       window.location.hash = `#/exames?paciente=${patient.id}`;
     });
 
-    // Load exam records
     loadOverviewRecords(modal.element.querySelector('#overview-records-container'), patient.id);
   }
 
@@ -197,8 +192,8 @@ export async function renderPatients(container) {
       });
       const sortedDates = Object.keys(byDate).sort().reverse();
 
-      // Render accordion groups
-      containerEl.innerHTML = sortedDates.map((date, idx) => {
+      // All collapsed by default
+      containerEl.innerHTML = sortedDates.map((date) => {
         const dayRecords = byDate[date];
         const chips = dayRecords.map(r => {
           const et = r.exam_types;
@@ -213,16 +208,14 @@ export async function renderPatients(container) {
           </span>`;
         }).join('');
 
-        // First entry starts expanded
-        const isOpen = idx === 0;
         return `
-          <div class="date-record-group${isOpen ? ' is-open' : ''}">
-            <button class="date-record-toggle" aria-expanded="${isOpen}">
+          <div class="date-record-group">
+            <button class="date-record-toggle" aria-expanded="false">
               <div class="date-toggle-left">
                 <span class="date-badge">${formatDate(date)}</span>
                 <span class="date-count">${dayRecords.length} exame(s)</span>
               </div>
-              <svg class="date-toggle-arrow" width="16" height="16" viewBox="0 0 24 24"
+              <svg class="date-toggle-arrow" width="18" height="18" viewBox="0 0 24 24"
                 fill="none" stroke="currentColor" stroke-width="2.5">
                 <polyline points="6 9 12 15 18 9"/>
               </svg>
@@ -233,7 +226,7 @@ export async function renderPatients(container) {
           </div>`;
       }).join('');
 
-      // Attach accordion toggle listeners
+      // Accordion toggle
       containerEl.querySelectorAll('.date-record-toggle').forEach(btn => {
         btn.addEventListener('click', () => {
           const group = btn.closest('.date-record-group');
@@ -258,8 +251,12 @@ export async function renderPatients(container) {
         <input type="text" id="modal-patient-name" class="form-input" value="${isEdit ? escapeHtml(patient.name) : ''}" placeholder="Nome completo" />
       </div>
       <div class="form-group">
-        <label class="form-label">Observações</label>
-        <textarea id="modal-patient-notes" class="form-input" rows="3" placeholder="Leito, diagnóstico, etc.">${isEdit ? escapeHtml(patient.notes || '') : ''}</textarea>
+        <label class="form-label">Localização</label>
+        <input type="text" id="modal-patient-location" class="form-input" value="${isEdit ? escapeHtml(patient.location || '') : ''}" placeholder="Ex: Leito 4 - UTI, Quarto 210..." />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notas</label>
+        <textarea id="modal-patient-notes" class="form-input" rows="3" placeholder="Diagnóstico, observações...">${isEdit ? escapeHtml(patient.notes || '') : ''}</textarea>
       </div>
     `;
 
@@ -274,14 +271,15 @@ export async function renderPatients(container) {
 
     modal.element.querySelector('#modal-save').addEventListener('click', async () => {
       const name = modal.element.querySelector('#modal-patient-name').value.trim();
+      const location = modal.element.querySelector('#modal-patient-location').value.trim();
       const notes = modal.element.querySelector('#modal-patient-notes').value.trim();
       if (!name) { showToast('Nome é obrigatório', 'error'); return; }
       try {
         if (isEdit) {
-          await updatePatient(patient.id, { name, notes });
+          await updatePatient(patient.id, { name, location, notes });
           showToast('Paciente atualizado!');
         } else {
-          await createPatient(name, notes);
+          await createPatient(name, notes, location);
           showToast('Paciente cadastrado!');
         }
         modal.close();

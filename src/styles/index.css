@@ -551,7 +551,7 @@ tbody tr:last-child td { border-bottom: none; }
 .patient-card { cursor: pointer; }
 .patient-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--accent); }
 .patient-name { font-weight: 700; font-size: 1.05rem; margin-bottom: 4px; }
-.patient-notes { color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.patient-location { color: var(--accent); font-size: 0.82rem; font-weight: 500; margin-bottom: 12px; opacity: 0.85; }
 .patient-meta { display: flex; gap: 16px; font-size: 0.75rem; color: var(--text-muted); }
 .patient-actions {
   display: flex;
@@ -604,6 +604,15 @@ tbody tr:last-child td { border-bottom: none; }
   font-size: 1.15rem;
   font-weight: 700;
   color: var(--text-primary);
+}
+
+.overview-location {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.82rem;
 }
 
 .overview-meta {
@@ -692,9 +701,10 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 .date-toggle-arrow {
-  color: var(--text-muted);
+  color: var(--accent);
   transition: transform 0.25s ease;
   flex-shrink: 0;
+  opacity: 0.9;
 }
 
 .date-record-group.is-open .date-toggle-arrow {
