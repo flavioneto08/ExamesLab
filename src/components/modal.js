@@ -1,10 +1,10 @@
 // Reusable modal component
-export function openModal({ title, body, footer, onClose }) {
+export function openModal({ title, body, footer, onClose, wide = false }) {
   const container = document.getElementById('modal-container');
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.innerHTML = `
-    <div class="modal">
+    <div class="modal${wide ? ' modal-wide' : ''}">
       <div class="modal-header">
         <h3 class="modal-title">${title}</h3>
         <button class="modal-close" data-close>&times;</button>

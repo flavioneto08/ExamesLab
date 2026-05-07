@@ -9,7 +9,11 @@ export async function renderExams(container) {
         <h1>Registrar <span>Exames</span></h1>
         <p class="page-subtitle">Preencha os valores dos exames do dia</p>
       </div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="import-text-btn" class="btn btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Importar Texto
+        </button>
         <button id="add-exam-type-btn" class="btn btn-secondary">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Novo Tipo de Exame
@@ -45,6 +49,8 @@ export async function renderExams(container) {
   let examTypes = [];
   let existingRecords = [];
   let activeExamTypeIds = new Set();
+  // Holds values imported from text before grid render
+  let pendingImportValues = {};
 
   const patientSelect = container.querySelector('#exam-patient-select');
   const dateInput = container.querySelector('#exam-date-input');
@@ -88,7 +94,6 @@ export async function renderExams(container) {
 
     try {
       existingRecords = await getExamRecordsByDate(patientId, date);
-      // Show all exam types, pre-fill values from existing records
       activeExamTypeIds = new Set(examTypes.map(et => et.id));
       renderExamGrid();
     } catch (err) {
@@ -105,16 +110,23 @@ export async function renderExams(container) {
 
     fieldsContainer.innerHTML = `<div class="exam-grid">${activeTypes.map(et => {
       const record = existingRecords.find(r => r.exam_type_id === et.id);
-      const val = record ? record.value : '';
+      // Priority: pendingImportValues > existingRecords
+      const val = pendingImportValues[et.id] !== undefined
+        ? pendingImportValues[et.id]
+        : (record ? record.value : '');
       const refText = (et.reference_min != null && et.reference_max != null)
         ? `Ref: ${et.reference_min} - ${et.reference_max}`
         : '';
       let valueClass = '';
-      if (record && et.reference_max != null && record.value > et.reference_max) valueClass = 'value-high';
-      if (record && et.reference_min != null && record.value < et.reference_min) valueClass = 'value-low';
+      const numVal = parseFloat(String(val).replace(',', '.'));
+      if (!isNaN(numVal) && et.reference_max != null && numVal > et.reference_max) valueClass = 'value-high';
+      if (!isNaN(numVal) && et.reference_min != null && numVal < et.reference_min) valueClass = 'value-low';
+
+      // Highlight fields that came from import
+      const isImported = pendingImportValues[et.id] !== undefined;
 
       return `
-        <div class="exam-field" data-type-id="${et.id}">
+        <div class="exam-field${isImported ? ' exam-field-imported' : ''}" data-type-id="${et.id}">
           <button class="exam-field-remove" title="Remover este exame do dia" data-remove="${et.id}">&times;</button>
           <div class="exam-field-header">
             <span class="exam-field-abbr">${escapeHtml(et.abbreviation)}</span>
@@ -132,7 +144,7 @@ export async function renderExams(container) {
       btn.addEventListener('click', async () => {
         const typeId = btn.dataset.remove;
         activeExamTypeIds.delete(typeId);
-        // Also delete from DB if exists
+        delete pendingImportValues[typeId];
         const patientId = patientSelect.value;
         const date = dateInput.value;
         try {
@@ -153,6 +165,9 @@ export async function renderExams(container) {
           if (et.reference_max != null && v > et.reference_max) input.classList.add('value-high');
           if (et.reference_min != null && v < et.reference_min) input.classList.add('value-low');
         }
+        // Clear pending import highlight once user edits
+        const field = input.closest('.exam-field');
+        if (field) field.classList.remove('exam-field-imported');
       });
     });
   }
@@ -184,8 +199,9 @@ export async function renderExams(container) {
 
     try {
       await upsertExamRecords(records);
+      pendingImportValues = {};
       showToast(`${records.length} exame(s) salvo(s) com sucesso!`);
-      await loadExamFields(); // Reload to show saved state
+      await loadExamFields();
     } catch (err) {
       showToast('Erro ao salvar: ' + err.message, 'error');
     } finally {
@@ -255,10 +271,244 @@ export async function renderExams(container) {
       }
     });
   });
+
+  // ===== IMPORT TEXT =====
+  container.querySelector('#import-text-btn').addEventListener('click', () => {
+    openImportModal();
+  });
+
+  function openImportModal() {
+    const bodyEl = document.createElement('div');
+    bodyEl.innerHTML = `
+      <div class="form-group">
+        <label class="form-label">Cole o texto dos exames abaixo</label>
+        <textarea
+          id="import-raw-text"
+          class="form-input import-textarea"
+          rows="7"
+          placeholder="01/05/26: BT 1,8 | BI 0,9 | BD 0,9 | CA 8,2 | CR 1,2&#10;PCR 2,77 | PT 5,7 | ALB 3,2 | GLOB 2,5 | TGO 34"></textarea>
+      </div>
+      <div id="import-preview" class="import-preview" style="display:none"></div>
+    `;
+
+    const modal = openModal({
+      title: 'Importar Exames por Texto',
+      body: bodyEl,
+      footer: `
+        <button class="btn btn-secondary" data-close>Cancelar</button>
+        <button class="btn btn-secondary" id="import-analyze-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Analisar
+        </button>
+        <button class="btn btn-primary" id="import-confirm-btn" style="display:none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Importar
+        </button>
+      `,
+      wide: true
+    });
+
+    const textarea = modal.element.querySelector('#import-raw-text');
+    const previewEl = modal.element.querySelector('#import-preview');
+    const analyzeBtn = modal.element.querySelector('#import-analyze-btn');
+    const confirmBtn = modal.element.querySelector('#import-confirm-btn');
+
+    modal.element.querySelector('[data-close]').addEventListener('click', modal.close);
+
+    // Re-show analyze btn and hide confirm when user changes text
+    textarea.addEventListener('input', () => {
+      previewEl.style.display = 'none';
+      confirmBtn.style.display = 'none';
+      analyzeBtn.style.display = '';
+    });
+
+    let parsedEntries = [];
+    let detectedDate = null;
+
+    analyzeBtn.addEventListener('click', () => {
+      const raw = textarea.value;
+      if (!raw.trim()) { showToast('Cole algum texto primeiro', 'error'); return; }
+
+      const parsed = parseExamText(raw);
+      parsedEntries = parsed.entries;
+      detectedDate = parsed.date;
+
+      if (parsedEntries.length === 0) {
+        previewEl.style.display = 'block';
+        previewEl.innerHTML = `<div class="import-empty">Nenhum exame encontrado no texto. Verifique o formato.</div>`;
+        confirmBtn.style.display = 'none';
+        return;
+      }
+
+      // Build preview
+      const dateInfo = detectedDate
+        ? `<div class="import-date-badge">📅 Data detectada: <strong>${formatDateDisplay(detectedDate)}</strong></div>`
+        : `<div class="import-date-badge import-date-missing">⚠️ Data não detectada — será usada a data selecionada na tela</div>`;
+
+      const items = parsedEntries.map(entry => {
+        const found = examTypes.find(et => et.abbreviation.toUpperCase() === entry.abbr.toUpperCase());
+        const statusClass = found ? 'import-item-known' : 'import-item-new';
+        const statusLabel = found
+          ? `<span class="import-badge import-badge-known">✓ cadastrado</span>`
+          : `<span class="import-badge import-badge-new">+ novo</span>`;
+        return `
+          <div class="import-item ${statusClass}">
+            <span class="import-item-abbr">${escapeHtml(entry.abbr)}</span>
+            <span class="import-item-arrow">→</span>
+            <span class="import-item-value">${entry.value}</span>
+            ${statusLabel}
+          </div>`;
+      }).join('');
+
+      const newCount = parsedEntries.filter(e =>
+        !examTypes.find(et => et.abbreviation.toUpperCase() === e.abbr.toUpperCase())
+      ).length;
+
+      const summary = newCount > 0
+        ? `<div class="import-summary">⚡ <strong>${newCount}</strong> tipo(s) novo(s) serão criados automaticamente com a sigla.</div>`
+        : '';
+
+      previewEl.innerHTML = `${dateInfo}${summary}<div class="import-items-grid">${items}</div>`;
+      previewEl.style.display = 'block';
+      confirmBtn.style.display = '';
+      analyzeBtn.style.display = 'none';
+    });
+
+    confirmBtn.addEventListener('click', async () => {
+      if (!patientSelect.value) {
+        showToast('Selecione um paciente antes de importar', 'error');
+        modal.close();
+        return;
+      }
+
+      confirmBtn.disabled = true;
+      confirmBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;margin:0;border-width:2px"></div> Importando...';
+
+      try {
+        // Update date field if detected
+        if (detectedDate) {
+          dateInput.value = detectedDate;
+          // Reload existing records for the new date
+          existingRecords = await getExamRecordsByDate(patientSelect.value, detectedDate);
+        }
+
+        // Create missing exam types
+        for (const entry of parsedEntries) {
+          let et = examTypes.find(e => e.abbreviation.toUpperCase() === entry.abbr.toUpperCase());
+          if (!et) {
+            et = await createExamType({
+              name: entry.abbr.toUpperCase(),
+              abbreviation: entry.abbr.toUpperCase(),
+              unit: '',
+              reference_min: null,
+              reference_max: null
+            });
+            examTypes.push(et);
+            showToast(`Tipo "${entry.abbr.toUpperCase()}" criado`, 'info');
+          }
+          // Map value to exam type id
+          entry.examTypeId = et.id;
+        }
+
+        // Build pendingImportValues map
+        pendingImportValues = {};
+        parsedEntries.forEach(entry => {
+          if (entry.examTypeId) {
+            pendingImportValues[entry.examTypeId] = entry.value;
+          }
+        });
+
+        // Ensure all imported types are active
+        parsedEntries.forEach(entry => {
+          if (entry.examTypeId) activeExamTypeIds.add(entry.examTypeId);
+        });
+
+        saveBtn.disabled = false;
+        modal.close();
+        renderExamGrid();
+
+        const newCount = parsedEntries.filter(e =>
+          !examTypes.find(et => et.id !== e.examTypeId && et.abbreviation.toUpperCase() === e.abbr.toUpperCase())
+        ).length;
+        showToast(`${parsedEntries.length} exame(s) importado(s)${detectedDate ? ` — data atualizada para ${formatDateDisplay(detectedDate)}` : ''}`, 'success');
+      } catch (err) {
+        showToast('Erro ao importar: ' + err.message, 'error');
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Importar`;
+      }
+    });
+
+    setTimeout(() => textarea.focus(), 100);
+  }
+}
+
+// ===== PARSE EXAM TEXT =====
+/**
+ * Parses the multi-line exam text format.
+ * Returns: { date: string|null (YYYY-MM-DD), entries: [{abbr, value}] }
+ * 
+ * Format example:
+ *   01/05/26: BT 1,8 | BI 0,9 | BD 0,9
+ *   PCR 2,77 | PT 5,7
+ *   | HT 36,9 | HCM 34,4
+ */
+function parseExamText(rawText) {
+  const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+
+  // Try to detect date from first line: DD/MM/YY or DD/MM/YYYY
+  let date = null;
+  const dateRegex = /(\d{2})\/(\d{2})\/(\d{2,4})/;
+  const firstLine = lines[0] || '';
+  const dateMatch = firstLine.match(dateRegex);
+  if (dateMatch) {
+    const [, day, month, yearRaw] = dateMatch;
+    const year = yearRaw.length === 2 ? '20' + yearRaw : yearRaw;
+    date = `${year}-${month}-${day}`;
+  }
+
+  // Remove date prefix from first line (e.g. "01/05/26:")
+  if (dateMatch) {
+    lines[0] = lines[0].replace(/^\d{2}\/\d{2}\/\d{2,4}\s*:\s*/, '').trim();
+  }
+
+  // Join all lines into one token string, treating | as separator across lines
+  const joined = lines.join(' | ');
+
+  // Split by |
+  const tokens = joined.split('|').map(t => t.trim()).filter(Boolean);
+
+  const entries = [];
+  // Each token should be: SIGLA VALUE (e.g. "BT 1,8" or "LEUCOS 7800")
+  const entryRegex = /^([A-Za-záàãâõóíúçÁÀÃÂÕÓÍÚÇ0-9]+)\s+([\d.,]+)/;
+
+  for (const token of tokens) {
+    const m = token.match(entryRegex);
+    if (m) {
+      const abbr = m[1].trim().toUpperCase();
+      const rawValue = m[2].trim().replace(',', '.');
+      const value = parseFloat(rawValue);
+      if (!isNaN(value)) {
+        entries.push({ abbr, value });
+      }
+    }
+  }
+
+  return { date, entries };
 }
 
 function escapeHtml(str) {
   const d = document.createElement('div');
-  d.textContent = str;
+  d.textContent = str || '';
   return d.innerHTML;
+}
+
+function formatDate(dateStr) {
+  const [y, m, d] = dateStr.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function formatDateDisplay(isoDate) {
+  if (!isoDate) return '';
+  const [y, m, d] = isoDate.split('-');
+  return `${d}/${m}/${y}`;
 }
