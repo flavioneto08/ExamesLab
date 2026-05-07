@@ -109,16 +109,29 @@ export async function renderPatients(container) {
         <div class="overview-section overview-notes-section">
           <div class="overview-section-title">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-            Notas do Paciente
+            Dados do Paciente
           </div>
-          <textarea
-            id="overview-notes"
-            class="form-input overview-notes-textarea"
-            placeholder="Evolução clínica, diagnóstico, observações..."
-          >${escapeHtml(patient.notes || '')}</textarea>
+          <div class="form-group" style="margin-bottom:10px">
+            <label class="form-label" style="font-size:0.75rem">Localização</label>
+            <input
+              type="text"
+              id="overview-location"
+              class="form-input"
+              value="${escapeHtml(patient.location || '')}"
+              placeholder="Ex: Leito 4 - UTI, Quarto 210..."
+            />
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label" style="font-size:0.75rem">Notas</label>
+            <textarea
+              id="overview-notes"
+              class="form-input overview-notes-textarea"
+              placeholder="Evolução clínica, diagnóstico, observações..."
+            >${escapeHtml(patient.notes || '')}</textarea>
+          </div>
           <button id="save-notes-btn" class="btn btn-primary btn-sm" style="margin-top:8px;align-self:flex-end">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-            Salvar Notas
+            Salvar
           </button>
         </div>
 
@@ -149,13 +162,28 @@ export async function renderPatients(container) {
     });
 
     modal.element.querySelector('#save-notes-btn').addEventListener('click', async () => {
+      const location = modal.element.querySelector('#overview-location').value.trim();
       const notes = modal.element.querySelector('#overview-notes').value.trim();
       const btn = modal.element.querySelector('#save-notes-btn');
       btn.disabled = true;
       try {
-        await updatePatient(patient.id, { notes });
+        await updatePatient(patient.id, { location, notes });
+        patient.location = location;
         patient.notes = notes;
-        showToast('Notas salvas!');
+        // Refresh the header location display
+        const metaEl = modal.element.querySelector('.overview-meta');
+        if (metaEl) {
+          const locSpan = metaEl.querySelector('.overview-location');
+          if (location) {
+            if (locSpan) locSpan.textContent = `📍 ${location}`;
+            else metaEl.insertAdjacentHTML('afterbegin', `<span class="overview-location">📍 ${escapeHtml(location)}</span> · `);
+          } else if (locSpan) {
+            locSpan.nextSibling?.remove(); // remove the " · " text node
+            locSpan.remove();
+          }
+        }
+        showToast('Dados salvos!');
+        await loadPatients(); // refresh card on list
       } catch (err) {
         showToast('Erro ao salvar: ' + err.message, 'error');
       } finally {
