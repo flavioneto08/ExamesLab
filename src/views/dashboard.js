@@ -200,27 +200,28 @@ export async function renderDashboard(container) {
       };
 
       // Add reference lines if available
-      const annotations = {};
       if (et.reference_min != null) {
         chartData.datasets.push({
-          label: 'Mín. Ref.',
+          label: `Mín. Ref. (${et.reference_min})`,
           data: etRecords.map(() => et.reference_min),
-          borderColor: 'rgba(255,165,2,0.4)',
-          borderDash: [5, 5],
+          borderColor: 'rgba(255,180,0,0.85)',
+          borderDash: [8, 4],
           pointRadius: 0,
-          borderWidth: 1,
-          fill: false
+          borderWidth: 2,
+          fill: false,
+          tension: 0
         });
       }
       if (et.reference_max != null) {
         chartData.datasets.push({
-          label: 'Máx. Ref.',
+          label: `Máx. Ref. (${et.reference_max})`,
           data: etRecords.map(() => et.reference_max),
-          borderColor: 'rgba(255,71,87,0.4)',
-          borderDash: [5, 5],
+          borderColor: 'rgba(255,80,80,0.85)',
+          borderDash: [8, 4],
           pointRadius: 0,
-          borderWidth: 1,
-          fill: false
+          borderWidth: 2,
+          fill: false,
+          tension: 0
         });
       }
 
@@ -233,7 +234,7 @@ export async function renderDashboard(container) {
           interaction: { intersect: false, mode: 'index' },
           plugins: {
             legend: {
-              labels: { color: '#8888a8', font: { family: 'Inter', size: 11 } }
+              labels: { color: '#b0b0c8', font: { family: 'Inter', size: 11 } }
             },
             tooltip: {
               backgroundColor: '#1a1a3a',

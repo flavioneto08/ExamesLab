@@ -283,7 +283,12 @@ input, select, textarea { font-family: var(--font); }
   box-shadow: 0 0 0 3px var(--accent-dim);
 }
 .form-input::placeholder { color: var(--text-muted); }
-.form-select { cursor: pointer; appearance: none; }
+.form-select { cursor: pointer; appearance: none; color-scheme: dark; }
+.form-select option,
+select option {
+  background-color: #1a1a2e;
+  color: #e8e8f0;
+}
 .form-row { display: flex; gap: 12px; }
 .form-row > * { flex: 1; }
 
