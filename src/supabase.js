@@ -172,6 +172,15 @@ export async function deleteExamRecord(id) {
   if (error) throw error;
 }
 
+export async function deleteExamRecordsByDate(patientId, date) {
+  const { error } = await supabase
+    .from('exam_records')
+    .delete()
+    .eq('patient_id', patientId)
+    .eq('exam_date', date);
+  if (error) throw error;
+}
+
 export async function getPatientRecordDates(patientId) {
   const { data, error } = await supabase
     .from('exam_records')
