@@ -68,24 +68,26 @@ async function navigate() {
 
 // ===== AUTH STATE MANAGEMENT =====
 function initApp(user) {
-  // Show user email in sidebar
+  if (window._appInitialized) return; // prevent double-init
+  window._appInitialized = true;
   if (userEmailEl) userEmailEl.textContent = user.email;
-
-  // Start routing
   window.addEventListener('hashchange', navigate);
   navigate();
 }
 
 supabase.auth.onAuthStateChange((event, session) => {
   if (event === 'SIGNED_IN' && session?.user) {
-    initApp(session.user);
+    // Only init if not already initialized (e.g., after page refresh)
+    if (!document.getElementById('auth-overlay') && !window._appInitialized) {
+      initApp(session.user);
+    }
   }
   if (event === 'SIGNED_OUT') {
-    // Clean up and show login
+    window._appInitialized = false;
     window.removeEventListener('hashchange', navigate);
     viewContainer.innerHTML = '';
     if (userEmailEl) userEmailEl.textContent = '';
-    renderAuth(() => {});
+    renderAuth((user) => initApp(user));
   }
 });
 
@@ -95,9 +97,7 @@ async function bootstrap() {
   if (session?.user) {
     initApp(session.user);
   } else {
-    renderAuth(() => {
-      // After login the onAuthStateChange will fire and call initApp
-    });
+    renderAuth((user) => initApp(user));
   }
 }
 
