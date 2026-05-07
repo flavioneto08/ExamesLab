@@ -645,7 +645,7 @@ tbody tr:last-child td { border-bottom: none; }
 
 .overview-notes-textarea {
   resize: vertical;
-  min-height: 130px;
+  min-height: 200px;
   font-size: 0.88rem;
   line-height: 1.6;
 }
@@ -664,16 +664,53 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 .date-record-group {
-  background: rgba(0,0,0,0.2);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  padding: 10px 12px;
+  overflow: hidden;
 }
 
-.date-record-header {
+.date-record-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: rgba(255,255,255,0.03);
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background var(--transition);
+  font-family: var(--font);
+}
+
+.date-record-toggle:hover { background: rgba(255,255,255,0.06); }
+
+.date-toggle-left {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 8px;
+}
+
+.date-toggle-arrow {
+  color: var(--text-muted);
+  transition: transform 0.25s ease;
+  flex-shrink: 0;
+}
+
+.date-record-group.is-open .date-toggle-arrow {
+  transform: rotate(180deg);
+}
+
+.date-record-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease, padding 0.3s ease;
+  padding: 0 12px;
+}
+
+.date-record-group.is-open .date-record-body {
+  max-height: 400px;
+  padding: 10px 12px;
 }
 
 .date-badge {
@@ -743,6 +780,9 @@ tbody tr:last-child td { border-bottom: none; }
 /* ===== MODAL WIDE ===== */
 .modal-wide {
   max-width: 660px;
+}
+.modal-xl {
+  max-width: 900px;
 }
 
 /* ===== IMPORT FEATURE ===== */

@@ -146,7 +146,7 @@ export async function renderPatients(container) {
           Registrar Exames
         </button>
       `,
-      wide: true
+      size: 'xl'
     });
 
     // Save notes
@@ -197,7 +197,8 @@ export async function renderPatients(container) {
       });
       const sortedDates = Object.keys(byDate).sort().reverse();
 
-      containerEl.innerHTML = sortedDates.map(date => {
+      // Render accordion groups
+      containerEl.innerHTML = sortedDates.map((date, idx) => {
         const dayRecords = byDate[date];
         const chips = dayRecords.map(r => {
           const et = r.exam_types;
@@ -212,15 +213,36 @@ export async function renderPatients(container) {
           </span>`;
         }).join('');
 
+        // First entry starts expanded
+        const isOpen = idx === 0;
         return `
-          <div class="date-record-group">
-            <div class="date-record-header">
-              <span class="date-badge">${formatDate(date)}</span>
-              <span class="date-count">${dayRecords.length} exame(s)</span>
+          <div class="date-record-group${isOpen ? ' is-open' : ''}">
+            <button class="date-record-toggle" aria-expanded="${isOpen}">
+              <div class="date-toggle-left">
+                <span class="date-badge">${formatDate(date)}</span>
+                <span class="date-count">${dayRecords.length} exame(s)</span>
+              </div>
+              <svg class="date-toggle-arrow" width="16" height="16" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            <div class="date-record-body">
+              <div class="exam-chips-row">${chips}</div>
             </div>
-            <div class="exam-chips-row">${chips}</div>
           </div>`;
       }).join('');
+
+      // Attach accordion toggle listeners
+      containerEl.querySelectorAll('.date-record-toggle').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const group = btn.closest('.date-record-group');
+          const isOpen = group.classList.contains('is-open');
+          group.classList.toggle('is-open', !isOpen);
+          btn.setAttribute('aria-expanded', String(!isOpen));
+        });
+      });
+
     } catch (err) {
       containerEl.innerHTML = `<div class="overview-empty"><p>Erro ao carregar registros</p></div>`;
     }

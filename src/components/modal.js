@@ -1,10 +1,14 @@
 // Reusable modal component
-export function openModal({ title, body, footer, onClose, wide = false }) {
+// size: 'md' (480px default) | 'lg' (660px) | 'xl' (900px)
+export function openModal({ title, body, footer, onClose, wide = false, size = 'md' }) {
   const container = document.getElementById('modal-container');
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
+  const sizeClass = (size === 'xl' || wide === 'xl') ? ' modal-xl'
+                  : (size === 'lg' || wide === true)  ? ' modal-wide'
+                  : '';
   backdrop.innerHTML = `
-    <div class="modal${wide ? ' modal-wide' : ''}">
+    <div class="modal${sizeClass}">
       <div class="modal-header">
         <h3 class="modal-title">${title}</h3>
         <button class="modal-close" data-close>&times;</button>
