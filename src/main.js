@@ -1,18 +1,22 @@
 import './styles/index.css';
-import { initToast } from './components/toast.js';
+import { initToast, showToast } from './components/toast.js';
 import { renderPatients } from './views/patients.js';
 import { renderExams } from './views/exams.js';
 import { renderDashboard } from './views/dashboard.js';
+import { renderAuth } from './views/auth.js';
+import { supabase, signOut } from './supabase.js';
 
 // Initialize toast system
 initToast();
 
 // DOM references
 const viewContainer = document.getElementById('view-container');
-const navLinks = document.querySelectorAll('.nav-link');
-const sidebar = document.getElementById('sidebar');
-const overlay = document.getElementById('sidebar-overlay');
-const menuToggle = document.getElementById('menu-toggle');
+const navLinks      = document.querySelectorAll('.nav-link');
+const sidebar       = document.getElementById('sidebar');
+const overlay       = document.getElementById('sidebar-overlay');
+const menuToggle    = document.getElementById('menu-toggle');
+const userEmailEl   = document.getElementById('user-email');
+const logoutBtn     = document.getElementById('logout-btn');
 
 // Mobile sidebar toggle
 menuToggle.addEventListener('click', () => {
@@ -24,10 +28,19 @@ overlay.addEventListener('click', () => {
   overlay.classList.remove('active');
 });
 
+// Logout
+logoutBtn.addEventListener('click', async () => {
+  try {
+    await signOut();
+  } catch (err) {
+    showToast('Erro ao sair: ' + err.message, 'error');
+  }
+});
+
 // Router
 const routes = {
   '/pacientes': { render: renderPatients, nav: 'patients' },
-  '/exames': { render: renderExams, nav: 'exams' },
+  '/exames':    { render: renderExams,    nav: 'exams' },
   '/dashboard': { render: renderDashboard, nav: 'dashboard' },
 };
 
@@ -36,16 +49,13 @@ async function navigate() {
   const path = hash.replace('#', '').split('?')[0];
   const route = routes[path] || routes['/pacientes'];
 
-  // Update nav active state
   navLinks.forEach(link => {
     link.classList.toggle('active', link.dataset.view === route.nav);
   });
 
-  // Close mobile sidebar
   sidebar.classList.remove('open');
   overlay.classList.remove('active');
 
-  // Render view with animation
   viewContainer.style.opacity = '0';
   viewContainer.style.transform = 'translateY(8px)';
 
@@ -56,8 +66,42 @@ async function navigate() {
   }, 150);
 }
 
-window.addEventListener('hashchange', navigate);
-navigate();
+// ===== AUTH STATE MANAGEMENT =====
+function initApp(user) {
+  // Show user email in sidebar
+  if (userEmailEl) userEmailEl.textContent = user.email;
+
+  // Start routing
+  window.addEventListener('hashchange', navigate);
+  navigate();
+}
+
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_IN' && session?.user) {
+    initApp(session.user);
+  }
+  if (event === 'SIGNED_OUT') {
+    // Clean up and show login
+    window.removeEventListener('hashchange', navigate);
+    viewContainer.innerHTML = '';
+    if (userEmailEl) userEmailEl.textContent = '';
+    renderAuth(() => {});
+  }
+});
+
+// Initial check on load
+async function bootstrap() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user) {
+    initApp(session.user);
+  } else {
+    renderAuth(() => {
+      // After login the onAuthStateChange will fire and call initApp
+    });
+  }
+}
+
+bootstrap();
 
 // Register Service Worker for PWA
 if ('serviceWorker' in navigator) {
