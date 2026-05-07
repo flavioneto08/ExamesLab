@@ -172,12 +172,14 @@ export async function deleteExamRecord(id) {
   if (error) throw error;
 }
 
-export async function deleteExamRecordsByDate(patientId, date) {
-  const { error } = await supabase
+export async function deleteExamRecordsByDate(patientId, date, examTypeId = null) {
+  let query = supabase
     .from('exam_records')
     .delete()
     .eq('patient_id', patientId)
     .eq('exam_date', date);
+  if (examTypeId) query = query.eq('exam_type_id', examTypeId);
+  const { error } = await query;
   if (error) throw error;
 }
 

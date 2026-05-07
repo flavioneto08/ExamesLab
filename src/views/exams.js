@@ -124,10 +124,16 @@ export async function renderExams(container) {
 
       // Highlight fields that came from import
       const isImported = pendingImportValues[et.id] !== undefined;
+      // Global types cannot be removed from the session
+      const isGlobal = et.is_global === true;
+
+      const actionBtn = isGlobal
+        ? `<span class="exam-field-global-badge" title="Exame padrão (global)">🔒</span>`
+        : `<button class="exam-field-remove" title="Remover este exame do dia" data-remove="${et.id}">&times;</button>`;
 
       return `
         <div class="exam-field${isImported ? ' exam-field-imported' : ''}" data-type-id="${et.id}">
-          <button class="exam-field-remove" title="Remover este exame do dia" data-remove="${et.id}">&times;</button>
+          ${actionBtn}
           <div class="exam-field-header">
             <span class="exam-field-abbr">${escapeHtml(et.abbreviation)}</span>
             <span class="exam-field-unit">${et.unit || ''}</span>
@@ -139,7 +145,7 @@ export async function renderExams(container) {
       `;
     }).join('')}</div>`;
 
-    // Remove buttons
+    // Remove buttons (only for non-global/custom exam types)
     fieldsContainer.querySelectorAll('.exam-field-remove').forEach(btn => {
       btn.addEventListener('click', async () => {
         const typeId = btn.dataset.remove;
@@ -475,46 +481,103 @@ export async function renderExams(container) {
 /**
  * Parses the multi-line exam text format.
  * Returns: { date: string|null (YYYY-MM-DD), entries: [{abbr, value}] }
- * 
- * Format example:
- *   01/05/26: BT 1,8 | BI 0,9 | BD 0,9
- *   PCR 2,77 | PT 5,7
- *   | HT 36,9 | HCM 34,4
+ *
+ * Supported date formats (first line):
+ *   01/05/26: ...       → DD/MM/YY  (year auto-expanded to 20YY)
+ *   01/05/2026: ...     → DD/MM/YYYY
+ *   05/05: ...          → DD/MM  (current year assumed)
+ *   -05/05: ...         → leading hyphen/dash is stripped
+ *
+ * Supported exam separators:
+ *   BT 1,8 | BI 0,9     → pipe (|)
+ *   BT 2,3/ BD 1,2      → slash (/)
+ *
+ * Alias table — maps incoming abbreviations to the canonical one in the DB.
+ * Add more entries here as new synonyms are discovered.
  */
+const EXAM_ALIASES = {
+  // Proteínas Totais
+  'PTTS':  'PT',
+  'PROT':  'PT',
+  // Globulina
+  'GLB':   'GLOB',
+  // Ureia
+  'UR':    'U',
+  // Plaquetas
+  'PLT':   'PQT',
+  // Creatinina
+  'CREAT': 'CR',
+  'CREA':  'CR',
+};
+
 function parseExamText(rawText) {
   const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
 
-  // Try to detect date from first line: DD/MM/YY or DD/MM/YYYY
   let date = null;
-  const dateRegex = /(\d{2})\/(\d{2})\/(\d{2,4})/;
-  const firstLine = lines[0] || '';
-  const dateMatch = firstLine.match(dateRegex);
-  if (dateMatch) {
-    const [, day, month, yearRaw] = dateMatch;
+  const firstLineRaw = lines[0] || '';
+
+  // Strip leading hyphen / en-dash / em-dash before date detection
+  const firstLineNorm = firstLineRaw.replace(/^[-–—]\s*/, '');
+
+  // Pattern A: DD/MM/YY or DD/MM/YYYY (colon optional — backward compat)
+  const fullDateRe = /^(\d{2})\/(\d{2})\/(\d{2,4})/;
+  // Pattern B: DD/MM with NO year — colon REQUIRED to avoid ambiguity with slash separator
+  const shortDateRe = /^(\d{2})\/(\d{2})\s*:/;
+
+  const fullMatch  = firstLineNorm.match(fullDateRe);
+  const shortMatch = !fullMatch && firstLineNorm.match(shortDateRe);
+
+  if (fullMatch) {
+    const [, day, month, yearRaw] = fullMatch;
     const year = yearRaw.length === 2 ? '20' + yearRaw : yearRaw;
     date = `${year}-${month}-${day}`;
+    // Strip "[-]DD/MM/YY[YY][:]" from the first line
+    lines[0] = firstLineRaw.replace(/^[-–—]?\s*\d{2}\/\d{2}\/\d{2,4}\s*:?\s*/, '').trim();
+  } else if (shortMatch) {
+    const [, day, month] = shortMatch;
+    const year = new Date().getFullYear();
+    date = `${year}-${month}-${day}`;
+    // Strip "[-]DD/MM:" from the first line
+    lines[0] = firstLineRaw.replace(/^[-–—]?\s*\d{2}\/\d{2}\s*:\s*/, '').trim();
   }
 
-  // Remove date prefix from first line (e.g. "01/05/26:")
-  if (dateMatch) {
-    lines[0] = lines[0].replace(/^\d{2}\/\d{2}\/\d{2,4}\s*:\s*/, '').trim();
+  // --- Detect separator: pipe (|) or slash (/) ---
+  // If ANY line contains a pipe, we use pipe mode (existing behaviour).
+  // Otherwise we use slash mode.
+  const allText = lines.join('\n');
+  const hasPipe = allText.includes('|');
+
+  let tokens;
+  if (hasPipe) {
+    // Join lines with | so multi-line pipe text keeps working
+    const joined = lines.join(' | ');
+    tokens = joined.split('|').map(t => t.trim()).filter(Boolean);
+  } else {
+    // Join lines with / and split by /
+    const joined = lines.join(' / ');
+    tokens = joined.split('/').map(t => t.trim()).filter(Boolean);
   }
-
-  // Join all lines into one token string, treating | as separator across lines
-  const joined = lines.join(' | ');
-
-  // Split by |
-  const tokens = joined.split('|').map(t => t.trim()).filter(Boolean);
 
   const entries = [];
-  // Each token should be: SIGLA VALUE (e.g. "BT 1,8" or "LEUCOS 7800")
+  // Each token: ABBR VALUE  (e.g. "BT 1,8"  "LEUCOS 7800"  "PLT 270.000")
   const entryRegex = /^([A-Za-záàãâõóíúçÁÀÃÂÕÓÍÚÇ0-9]+)\s+([\d.,]+)/;
 
   for (const token of tokens) {
     const m = token.match(entryRegex);
     if (m) {
-      const abbr = m[1].trim().toUpperCase();
-      const rawValue = m[2].trim().replace(',', '.');
+      let abbr = m[1].trim().toUpperCase();
+      // Apply alias normalisation (known synonyms → canonical DB abbreviation)
+      abbr = EXAM_ALIASES[abbr] || abbr;
+
+      // Parse value — handle two Brazilian number conventions:
+      //   "270.000"  → thousands dot  → 270000
+      //   "1,8"      → decimal comma  → 1.8
+      let rawValue = m[2].trim();
+      if (/^\d+\.\d{3}$/.test(rawValue)) {
+        rawValue = rawValue.replace('.', ''); // remove thousands separator
+      } else {
+        rawValue = rawValue.replace(',', '.'); // decimal comma → dot
+      }
       const value = parseFloat(rawValue);
       if (!isNaN(value)) {
         entries.push({ abbr, value });
