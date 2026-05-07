@@ -278,14 +278,28 @@ export async function renderExams(container) {
   });
 
   function openImportModal() {
+    // Build patient options HTML
+    const patientOptions = patients.map(p =>
+      `<option value="${p.id}"${p.id === patientSelect.value ? ' selected' : ''}>${escapeHtml(p.name)}</option>`
+    ).join('');
+
     const bodyEl = document.createElement('div');
     bodyEl.innerHTML = `
+      <div class="form-row import-top-row">
+        <div class="form-group" style="flex:1">
+          <label class="form-label">Paciente</label>
+          <select id="import-patient-select" class="form-input form-select">
+            <option value="">Selecione um paciente...</option>
+            ${patientOptions}
+          </select>
+        </div>
+      </div>
       <div class="form-group">
         <label class="form-label">Cole o texto dos exames abaixo</label>
         <textarea
           id="import-raw-text"
           class="form-input import-textarea"
-          rows="7"
+          rows="6"
           placeholder="01/05/26: BT 1,8 | BI 0,9 | BD 0,9 | CA 8,2 | CR 1,2&#10;PCR 2,77 | PT 5,7 | ALB 3,2 | GLOB 2,5 | TGO 34"></textarea>
       </div>
       <div id="import-preview" class="import-preview" style="display:none"></div>
@@ -312,6 +326,7 @@ export async function renderExams(container) {
     const previewEl = modal.element.querySelector('#import-preview');
     const analyzeBtn = modal.element.querySelector('#import-analyze-btn');
     const confirmBtn = modal.element.querySelector('#import-confirm-btn');
+    const importPatientSelect = modal.element.querySelector('#import-patient-select');
 
     modal.element.querySelector('[data-close]').addEventListener('click', modal.close);
 
@@ -375,9 +390,9 @@ export async function renderExams(container) {
     });
 
     confirmBtn.addEventListener('click', async () => {
-      if (!patientSelect.value) {
+      if (!importPatientSelect.value) {
         showToast('Selecione um paciente antes de importar', 'error');
-        modal.close();
+        importPatientSelect.focus();
         return;
       }
 
@@ -385,12 +400,19 @@ export async function renderExams(container) {
       confirmBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;margin:0;border-width:2px"></div> Importando...';
 
       try {
+        // Sync modal patient selection back to main page
+        patientSelect.value = importPatientSelect.value;
+
         // Update date field if detected
         if (detectedDate) {
           dateInput.value = detectedDate;
-          // Reload existing records for the new date
-          existingRecords = await getExamRecordsByDate(patientSelect.value, detectedDate);
         }
+
+        // Reload existing records for the selected patient + date
+        existingRecords = await getExamRecordsByDate(
+          importPatientSelect.value,
+          dateInput.value
+        );
 
         // Create missing exam types
         for (const entry of parsedEntries) {
@@ -438,7 +460,14 @@ export async function renderExams(container) {
       }
     });
 
-    setTimeout(() => textarea.focus(), 100);
+    // Focus patient if not selected, otherwise textarea
+    setTimeout(() => {
+      if (!importPatientSelect.value) {
+        importPatientSelect.focus();
+      } else {
+        textarea.focus();
+      }
+    }, 100);
   }
 }
 
