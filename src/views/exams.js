@@ -508,6 +508,8 @@ const EXAM_ALIASES = {
   // Creatinina
   'CREAT': 'CR',
   'CREA':  'CR',
+  // Monócitos
+  'MON':   'MONO',
 };
 
 function parseExamText(rawText) {
