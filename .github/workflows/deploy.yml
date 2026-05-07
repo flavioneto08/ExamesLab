@@ -29,6 +29,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Inject build timestamp into service worker
+        run: |
+          BUILD_TIME=$(date +%Y%m%d%H%M%S)
+          sed -i "s/%%BUILD_TIME%%/${BUILD_TIME}/g" public/sw.js
+          echo "Service worker cache name: exameslab-${BUILD_TIME}"
+
       - name: Build
         run: npm run build
 
@@ -40,7 +46,7 @@ jobs:
   deploy:
     environment:
       name: github-pages
-      url: ${{ github.event.repository.html_url }}
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     needs: build
     steps:
