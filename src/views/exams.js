@@ -494,42 +494,85 @@ export async function renderExams(container) {
         // Sincronizar paciente e data com a tela principal
         patientSelect.value = pdfPatientSel.value;
         if (parsedResult.date) dateInput.value = parsedResult.date;
+        const targetPatient = pdfPatientSel.value;
+        const targetDate = dateInput.value;
 
-        existingRecords = await getExamRecordsByDate(pdfPatientSel.value, dateInput.value);
+        // Refresh do cache de tipos de exame para evitar tentar criar
+        // duplicatas quando outro fluxo (ou outro user) já criou o tipo.
+        const freshTypes = await getExamTypes();
+        examTypes.length = 0;
+        examTypes.push(...freshTypes);
 
-        // Criar tipos de exame inexistentes
+        // Resolver examTypeId para cada entry: usa existente ou cria novo.
+        // Em caso de violação UNIQUE (23505), re-fetcha e usa o existente.
+        const findByAbbr = (abbr) =>
+          examTypes.find(e => e.abbreviation.toUpperCase() === abbr.toUpperCase());
+
+        let createdCount = 0;
+        const skipped = [];
         for (const entry of parsedResult.entries) {
-          let et = examTypes.find(e => e.abbreviation.toUpperCase() === entry.abbr.toUpperCase());
+          const abbrUpper = entry.abbr.toUpperCase();
+          let et = findByAbbr(abbrUpper);
           if (!et) {
-            et = await createExamType({
-              name: entry.name,
-              abbreviation: entry.abbr.toUpperCase(),
-              unit: entry.unit || '',
-              reference_min: entry.ref_min,
-              reference_max: entry.ref_max,
-            });
-            examTypes.push(et);
-            showToast(`Tipo "${entry.abbr.toUpperCase()}" criado`, 'info');
+            try {
+              et = await createExamType({
+                name: entry.name,
+                abbreviation: abbrUpper,
+                unit: entry.unit || '',
+                reference_min: entry.ref_min,
+                reference_max: entry.ref_max,
+              });
+              examTypes.push(et);
+              createdCount++;
+            } catch (err) {
+              // Qualquer erro na criação dispara fallback: refetch + reuso.
+              // Cobre 23505 (UNIQUE), HTTP 409 e variações do supabase-js.
+              const refetched = await getExamTypes();
+              examTypes.length = 0;
+              examTypes.push(...refetched);
+              et = findByAbbr(abbrUpper);
+              if (!et) {
+                // Tipo provavelmente existe no banco mas o RLS esconde do
+                // SELECT atual. Pula este exame e segue com os outros em vez
+                // de abortar a importação inteira.
+                console.warn(`[import] Não foi possível resolver tipo "${abbrUpper}":`, err);
+                skipped.push(abbrUpper);
+                continue;
+              }
+            }
           }
           entry.examTypeId = et.id;
         }
 
-        // Popular pendingImportValues
-        pendingImportValues = {};
+        // Salvar os valores diretamente
+        const records = parsedResult.entries
+          .filter(e => e.examTypeId && !isNaN(parseFloat(e.value)))
+          .map(e => ({
+            patient_id: targetPatient,
+            exam_type_id: e.examTypeId,
+            exam_date: targetDate,
+            value: parseFloat(e.value),
+          }));
+
+        if (records.length > 0) {
+          await upsertExamRecords(records);
+        }
+
+        // Atualizar estado da tela principal
         parsedResult.entries.forEach(entry => {
-          if (entry.examTypeId) {
-            pendingImportValues[entry.examTypeId] = entry.value;
-            activeExamTypeIds.add(entry.examTypeId);
-          }
+          if (entry.examTypeId) activeExamTypeIds.add(entry.examTypeId);
         });
-
-        saveBtn.disabled = false;
-        modal.close();
+        pendingImportValues = {};
+        existingRecords = await getExamRecordsByDate(targetPatient, targetDate);
         renderExamGrid();
+        modal.close();
 
-        const total = parsedResult.entries.length;
-        const dateStr = parsedResult.date ? ` — data: ${formatDateDisplay(parsedResult.date)}` : '';
-        showToast(`${total} exame(s) importado(s) do PDF${dateStr}`, 'success');
+        const dateStr = parsedResult.date ? ` — ${formatDateDisplay(parsedResult.date)}` : '';
+        const createdStr = createdCount > 0 ? ` (${createdCount} tipo(s) novo(s))` : '';
+        showToast(`${records.length} exame(s) salvo(s) do PDF${dateStr}${createdStr}`, 'success');
+        if (skipped.length > 0) {
+          showToast(`${skipped.length} exame(s) pulado(s) por conflito de abreviação: ${skipped.join(', ')}`, 'error');
+        }
       } catch (err) {
         showToast('Erro ao importar: ' + err.message, 'error');
         confirmBtn.disabled = false;
