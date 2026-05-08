@@ -446,13 +446,17 @@ export async function renderExams(container) {
             ? `<span class="import-badge import-badge-known">✓ cadastrado</span>`
             : `<span class="import-badge import-badge-new">+ novo</span>`;
           const unitStr = entry.unit ? ` <small style="opacity:.6">${entry.unit}</small>` : '';
-          const refStr = entry.rawRef ? `<small style="opacity:.5;font-size:.7rem">Ref: ${entry.rawRef}</small>` : '';
+          const refStr = entry.rawRef
+            ? `<div class="import-item-ref">Ref: ${escapeHtml(entry.rawRef)}</div>`
+            : '';
           return `
             <div class="import-item ${statusClass}">
-              <span class="import-item-abbr">${escapeHtml(entry.abbr)}</span>
-              <span class="import-item-arrow">→</span>
-              <span class="import-item-value">${entry.value}${unitStr}</span>
-              ${statusLabel}
+              <div class="import-item-row">
+                <span class="import-item-abbr">${escapeHtml(entry.abbr)}</span>
+                <span class="import-item-arrow">→</span>
+                <span class="import-item-value">${entry.value}${unitStr}</span>
+                ${statusLabel}
+              </div>
               ${refStr}
             </div>`;
         }).join('');
@@ -630,10 +634,12 @@ export async function renderExams(container) {
           : `<span class="import-badge import-badge-new">+ novo</span>`;
         return `
           <div class="import-item ${statusClass}">
-            <span class="import-item-abbr">${escapeHtml(entry.abbr)}</span>
-            <span class="import-item-arrow">→</span>
-            <span class="import-item-value">${entry.value}</span>
-            ${statusLabel}
+            <div class="import-item-row">
+              <span class="import-item-abbr">${escapeHtml(entry.abbr)}</span>
+              <span class="import-item-arrow">→</span>
+              <span class="import-item-value">${entry.value}</span>
+              ${statusLabel}
+            </div>
           </div>`;
       }).join('');
 
