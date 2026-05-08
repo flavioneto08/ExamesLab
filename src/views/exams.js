@@ -1,4 +1,5 @@
 import { getPatients, getExamTypes, getExamRecordsByDate, upsertExamRecords, deleteExamRecordsByDate, createExamType } from '../supabase.js';
+import { parseSesSpPdf } from '../utils/pdfParser.js';
 import { showToast } from '../components/toast.js';
 import { openModal } from '../components/modal.js';
 
@@ -13,6 +14,10 @@ export async function renderExams(container) {
         <button id="import-text-btn" class="btn btn-secondary">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           Importar Texto
+        </button>
+        <button id="import-pdf-btn" class="btn btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          Importar PDF
         </button>
         <button id="add-exam-type-btn" class="btn btn-secondary">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -282,6 +287,257 @@ export async function renderExams(container) {
   container.querySelector('#import-text-btn').addEventListener('click', () => {
     openImportModal();
   });
+
+  // ===== IMPORT PDF =====
+  container.querySelector('#import-pdf-btn').addEventListener('click', () => {
+    openPdfImportModal();
+  });
+
+  function openPdfImportModal() {
+    const patientOptions = patients.map(p =>
+      `<option value="${p.id}"${p.id === patientSelect.value ? ' selected' : ''}>${escapeHtml(p.name)}</option>`
+    ).join('');
+
+    const bodyEl = document.createElement('div');
+    bodyEl.innerHTML = `
+      <div class="form-row import-top-row">
+        <div class="form-group" style="flex:1">
+          <label class="form-label">Paciente</label>
+          <select id="pdf-patient-select" class="form-input form-select">
+            <option value="">Selecione um paciente...</option>
+            ${patientOptions}
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Selecione o arquivo PDF do laudo</label>
+        <div class="pdf-drop-zone" id="pdf-drop-zone">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <p style="margin:8px 0 4px;font-weight:600">Arraste o PDF aqui</p>
+          <p style="margin:0;font-size:.8rem;opacity:.6">ou clique para selecionar</p>
+          <input type="file" id="pdf-file-input" accept=".pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer" />
+        </div>
+        <div id="pdf-file-name" style="margin-top:8px;font-size:.85rem;color:var(--color-primary);display:none"></div>
+      </div>
+      <div id="pdf-preview" class="import-preview" style="display:none"></div>
+    `;
+
+    // Inject drop zone styles if not already present
+    if (!document.getElementById('pdf-drop-zone-style')) {
+      const style = document.createElement('style');
+      style.id = 'pdf-drop-zone-style';
+      style.textContent = `
+        .pdf-drop-zone {
+          position: relative;
+          border: 2px dashed var(--color-border);
+          border-radius: 12px;
+          padding: 32px 16px;
+          text-align: center;
+          cursor: pointer;
+          transition: border-color .2s, background .2s;
+        }
+        .pdf-drop-zone:hover, .pdf-drop-zone.drag-over {
+          border-color: var(--color-primary);
+          background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+        }
+        .pdf-drop-zone.drag-over svg { opacity: 1 !important; }
+      `;
+      document.head.appendChild(style);
+    }
+
+    const modal = openModal({
+      title: 'Importar Exames por PDF (SES-SP)',
+      body: bodyEl,
+      footer: `
+        <button class="btn btn-secondary" data-close>Cancelar</button>
+        <button class="btn btn-secondary" id="pdf-analyze-btn" style="display:none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Analisar
+        </button>
+        <button class="btn btn-primary" id="pdf-confirm-btn" style="display:none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Importar
+        </button>
+      `,
+      wide: true
+    });
+
+    const fileInput      = modal.element.querySelector('#pdf-file-input');
+    const dropZone       = modal.element.querySelector('#pdf-drop-zone');
+    const fileNameEl     = modal.element.querySelector('#pdf-file-name');
+    const previewEl      = modal.element.querySelector('#pdf-preview');
+    const analyzeBtn     = modal.element.querySelector('#pdf-analyze-btn');
+    const confirmBtn     = modal.element.querySelector('#pdf-confirm-btn');
+    const pdfPatientSel  = modal.element.querySelector('#pdf-patient-select');
+
+    modal.element.querySelector('[data-close]').addEventListener('click', modal.close);
+
+    let selectedFile = null;
+    let parsedResult = null; // { date, patientName, reqNumber, entries }
+
+    // Drag & drop
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file) handleFileSelected(file);
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) handleFileSelected(fileInput.files[0]);
+    });
+
+    function handleFileSelected(file) {
+      if (!file.name.toLowerCase().endsWith('.pdf')) {
+        showToast('Selecione um arquivo .pdf', 'error');
+        return;
+      }
+      selectedFile = file;
+      fileNameEl.textContent = `📄 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      fileNameEl.style.display = 'block';
+      analyzeBtn.style.display = '';
+      confirmBtn.style.display = 'none';
+      previewEl.style.display = 'none';
+      parsedResult = null;
+    }
+
+    analyzeBtn.addEventListener('click', async () => {
+      if (!selectedFile) { showToast('Selecione um arquivo PDF primeiro', 'error'); return; }
+
+      analyzeBtn.disabled = true;
+      analyzeBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;margin:0;border-width:2px"></div> Lendo PDF...';
+      previewEl.style.display = 'none';
+
+      try {
+        const buffer = await selectedFile.arrayBuffer();
+        parsedResult = await parseSesSpPdf(buffer);
+
+        if (parsedResult.entries.length === 0) {
+          previewEl.innerHTML = `<div class="import-empty">Nenhum exame numérico encontrado no PDF.<br><small>Verifique se é um laudo da SES-SP com valores numéricos.</small></div>`;
+          previewEl.style.display = 'block';
+          analyzeBtn.disabled = false;
+          analyzeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Analisar`;
+          return;
+        }
+
+        // Auto-preencher nome do paciente se detectado e não há seleção
+        if (parsedResult.patientName && !pdfPatientSel.value) {
+          // Tentar encontrar paciente pelo nome (busca parcial case-insensitive)
+          const nameUpper = parsedResult.patientName.toUpperCase();
+          const matched = patients.find(p => p.name.toUpperCase().includes(nameUpper) || nameUpper.includes(p.name.toUpperCase()));
+          if (matched) pdfPatientSel.value = matched.id;
+        }
+
+        // Montar preview
+        const dateInfo = parsedResult.date
+          ? `<div class="import-date-badge">📅 Data de coleta: <strong>${formatDateDisplay(parsedResult.date)}</strong></div>`
+          : `<div class="import-date-badge import-date-missing">⚠️ Data não detectada — será usada a data selecionada na tela</div>`;
+
+        const reqInfo = parsedResult.reqNumber
+          ? `<div style="font-size:.8rem;opacity:.7;margin-bottom:8px">Requisição nº ${parsedResult.reqNumber}${parsedResult.patientName ? ' · ' + parsedResult.patientName : ''}</div>`
+          : '';
+
+        const items = parsedResult.entries.map(entry => {
+          const found = examTypes.find(et => et.abbreviation.toUpperCase() === entry.abbr.toUpperCase());
+          const statusClass = found ? 'import-item-known' : 'import-item-new';
+          const statusLabel = found
+            ? `<span class="import-badge import-badge-known">✓ cadastrado</span>`
+            : `<span class="import-badge import-badge-new">+ novo</span>`;
+          const unitStr = entry.unit ? ` <small style="opacity:.6">${entry.unit}</small>` : '';
+          const refStr = entry.rawRef ? `<small style="opacity:.5;font-size:.7rem">Ref: ${entry.rawRef}</small>` : '';
+          return `
+            <div class="import-item ${statusClass}">
+              <span class="import-item-abbr">${escapeHtml(entry.abbr)}</span>
+              <span class="import-item-arrow">→</span>
+              <span class="import-item-value">${entry.value}${unitStr}</span>
+              ${statusLabel}
+              ${refStr}
+            </div>`;
+        }).join('');
+
+        const newCount = parsedResult.entries.filter(e =>
+          !examTypes.find(et => et.abbreviation.toUpperCase() === e.abbr.toUpperCase())
+        ).length;
+        const summary = newCount > 0
+          ? `<div class="import-summary">⚡ <strong>${newCount}</strong> tipo(s) novo(s) serão criados automaticamente.</div>`
+          : '';
+
+        previewEl.innerHTML = `${dateInfo}${reqInfo}${summary}<div class="import-items-grid">${items}</div>`;
+        previewEl.style.display = 'block';
+        confirmBtn.style.display = '';
+        analyzeBtn.style.display = 'none';
+      } catch (err) {
+        showToast('Erro ao ler PDF: ' + err.message, 'error');
+        analyzeBtn.disabled = false;
+        analyzeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Analisar`;
+      }
+    });
+
+    confirmBtn.addEventListener('click', async () => {
+      if (!pdfPatientSel.value) {
+        showToast('Selecione um paciente antes de importar', 'error');
+        pdfPatientSel.focus();
+        return;
+      }
+      if (!parsedResult || parsedResult.entries.length === 0) return;
+
+      confirmBtn.disabled = true;
+      confirmBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;margin:0;border-width:2px"></div> Importando...';
+
+      try {
+        // Sincronizar paciente e data com a tela principal
+        patientSelect.value = pdfPatientSel.value;
+        if (parsedResult.date) dateInput.value = parsedResult.date;
+
+        existingRecords = await getExamRecordsByDate(pdfPatientSel.value, dateInput.value);
+
+        // Criar tipos de exame inexistentes
+        for (const entry of parsedResult.entries) {
+          let et = examTypes.find(e => e.abbreviation.toUpperCase() === entry.abbr.toUpperCase());
+          if (!et) {
+            et = await createExamType({
+              name: entry.name,
+              abbreviation: entry.abbr.toUpperCase(),
+              unit: entry.unit || '',
+              reference_min: entry.ref_min,
+              reference_max: entry.ref_max,
+            });
+            examTypes.push(et);
+            showToast(`Tipo "${entry.abbr.toUpperCase()}" criado`, 'info');
+          }
+          entry.examTypeId = et.id;
+        }
+
+        // Popular pendingImportValues
+        pendingImportValues = {};
+        parsedResult.entries.forEach(entry => {
+          if (entry.examTypeId) {
+            pendingImportValues[entry.examTypeId] = entry.value;
+            activeExamTypeIds.add(entry.examTypeId);
+          }
+        });
+
+        saveBtn.disabled = false;
+        modal.close();
+        renderExamGrid();
+
+        const total = parsedResult.entries.length;
+        const dateStr = parsedResult.date ? ` — data: ${formatDateDisplay(parsedResult.date)}` : '';
+        showToast(`${total} exame(s) importado(s) do PDF${dateStr}`, 'success');
+      } catch (err) {
+        showToast('Erro ao importar: ' + err.message, 'error');
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Importar`;
+      }
+    });
+
+    // Focus no seletor de paciente
+    setTimeout(() => {
+      if (!pdfPatientSel.value) pdfPatientSel.focus();
+    }, 100);
+  }
 
   function openImportModal() {
     // Build patient options HTML
